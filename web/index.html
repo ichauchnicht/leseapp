@@ -1,0 +1,685 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leseapp</title>
+<style>
+  :root { --bg:#f6f7fb; --card:#fff; --fg:#1d2433; --muted:#6b7385; --accent:#3b6cf6; --ok:#1f9d55; --danger:#d64545; --line:#e3e6ee; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12151d; --card:#1b2030; --fg:#eef0f6; --muted:#9aa2b5; --line:#2c3347; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,Segoe UI,Arial,sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width:900px; margin:0 auto; padding:16px; display:grid; gap:16px; }
+  h1 { margin:8px 0 0; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; }
+  h2 { margin:0 0 12px; font-size:1.1rem; }
+  button { font:inherit; padding:10px 16px; border:0; border-radius:10px; background:var(--accent); color:#fff; cursor:pointer; }
+  button.secondary { background:transparent; color:var(--fg); border:1px solid var(--line); }
+  button.ok { background:var(--ok); } button.danger { background:var(--danger); }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  #preview { max-width:100%; max-height:300px; border-radius:10px; margin-top:12px; display:none; }
+  progress { width:100%; margin-top:12px; display:none; }
+  #status { color:var(--muted); margin-top:8px; min-height:1.2em; }
+  #words { list-style:none; padding:0; margin:12px 0 0; display:flex; flex-wrap:wrap; gap:8px; }
+  #words li { background:var(--bg); border:1px solid var(--line); border-radius:999px; padding:6px 8px 6px 14px; font-size:1.3rem; display:flex; gap:8px; align-items:center; }
+  #words li button { padding:0 8px; background:transparent; color:var(--muted); font-size:1.1rem; }
+  #words.big li { font-size:2.2rem; padding:10px 22px; }
+  #words.big li button { display:none; }
+  #time { font-size:4rem; font-variant-numeric:tabular-nums; font-weight:700; text-align:center; margin:4px 0 12px; }
+  #laps { margin:12px 0 0; padding-left:20px; color:var(--muted); }
+  label.chk { display:flex; gap:6px; align-items:center; color:var(--muted); }
+  [hidden] { display:none !important; }
+  #flashView { position:fixed; inset:0; z-index:10; background:var(--bg); display:flex; flex-direction:column;
+               align-items:center; justify-content:center; padding:16px; text-align:center; overflow:auto; }
+  #flashTime::before { content:"Lesezeit "; font-size:.9rem; }
+  #flashTime.on { color:var(--ok); }
+  #flashTime { position:absolute; top:16px; right:20px; font-size:1.6rem; font-variant-numeric:tabular-nums; color:var(--muted); }
+  #flashWord { font-size:var(--fs, clamp(3rem, 14vw, 9rem)); font-weight:700; line-height:1.15; word-break:break-word; width:100%; }
+  .flashLine { display:flex; flex-wrap:wrap; justify-content:center; gap:.1em .5em; margin:.12em 0; }
+  .fwd { padding:0 .15em; border-radius:.2em; transition:color .15s, opacity .15s; }
+  #flashWord:has(.flashLine + .flashLine) .fwd, .flashLine > .fwd:not(:only-child) { cursor:pointer; opacity:.55; }
+  .flashLine > .fwd.cur, .flashLine > .fwd.done { opacity:1; }
+  .flashLine > .fwd.cur { text-decoration:underline; text-decoration-thickness:.06em; text-underline-offset:.12em; }
+  .fwd.done { color:var(--ok); }
+  .fwd.done .syl { color:var(--ok); background:transparent; }
+  #flashBadge { background:#ff7a1a22; color:#e8590c; border:1px solid #e8590c; border-radius:999px; padding:6px 16px; font-weight:600; margin-bottom:20px; }
+  .syl { display:inline-block; padding:0 .08em; border-radius:.15em; }
+  .syl:nth-child(odd)  { color:#3b6cf6; background:#3b6cf61a; }
+  .syl:nth-child(even) { color:#d6336c; background:#d6336c1a; }
+  .syl + .syl { margin-left:.12em; }
+  .syl { transition: all .15s; }
+  .syl.hit { background:#f59f00; color:#fff; box-shadow:0 0 0 .08em #f59f00; transform:scale(1.08); }
+  #flashInfo { color:var(--muted); margin-top:16px; min-height:1.5em; }
+  #flashMeter { width:min(320px, 80vw); height:10px; border-radius:999px; background:var(--line); margin-top:14px; overflow:hidden; }
+  #flashMeterBar { height:100%; width:0; background:var(--ok); transition:width .06s linear; }
+  #flashStatus { color:var(--muted); margin-top:8px; min-height:1.5em; font-size:1.2rem; }
+</style>
+</head>
+<body>
+<main>
+  <div class="row" style="justify-content:space-between">
+    <h1>📖 Leseapp</h1>
+    <span style="color:var(--muted)"><span id="who"></span> <button id="logout" class="secondary" style="padding:6px 12px">Abmelden</button></span>
+  </div>
+
+  <section>
+    <h2>1. Foto hochladen &amp; scannen</h2>
+    <div class="row">
+      <input type="file" id="file" accept="image/*">
+      <button id="scan" disabled>Scannen</button>
+    </div>
+    <img id="preview" alt="Vorschau">
+    <progress id="progress" max="1" value="0"></progress>
+    <div id="status"></div>
+  </section>
+
+  <section>
+    <h2>2. Wörter</h2>
+    <div class="row">
+      <button id="shuffle" class="secondary" disabled>🔀 Mischen</button>
+      <button id="big" class="secondary" disabled>🔍 Große Ansicht</button>
+      <button id="clear" class="secondary" disabled>Leeren</button>      <label class="chk"><input type="checkbox" id="dedupe" checked> Doppelte entfernen</label>
+      <span id="count" style="color:var(--muted)"></span>
+    </div>
+    <ul id="words"></ul>
+    <div class="row" style="margin-top:12px">
+      <input type="text" id="addInput" placeholder="Eigene Wörter (mehrere mit Leerzeichen/Komma)" size="34" style="font:inherit;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg)">
+      <button id="add" class="secondary">+ Hinzufügen</button>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <input type="text" id="listName" placeholder="Listenname" maxlength="40" style="font:inherit;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg)">
+      <button id="saveList" class="secondary" disabled>💾 Liste speichern</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <select id="listSelect" style="font:inherit;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg);min-width:12em"></select>
+      <button id="loadList" class="secondary" disabled>📂 Laden</button>
+      <button id="delList" class="secondary" disabled>🗑 Löschen</button>
+    </div>
+    <div id="listMsg" style="color:var(--muted);margin-top:8px;min-height:1.2em"></div>
+  </section>
+
+  <section>
+    <h2>3. Blitzlesen</h2>
+    <p style="margin:0 0 12px;color:var(--muted)">Vollbild: ein Wort nach dem anderen. Lies laut vor – die App hört zu (Azure Speech) und zeigt dann das nächste Wort. Die Zeit läuft automatisch mit.</p>
+    <div class="row">
+      <button id="flashStart" disabled>🎤 Blitzlesen starten</button>
+      <label class="chk">Erkennung:
+        <select id="level" style="font:inherit;padding:6px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg)">
+          <option value="streng">genau</option>
+          <option value="normal">normal</option>
+          <option value="grosszuegig">großzügig (Kinderstimme)</option>
+        </select>
+      </label>
+      <label class="chk"><input type="checkbox" id="pkgOn"> 📚 Mittelschwer: mehrere Wörter gleichzeitig</label>
+      <label class="chk">Wörter pro Zeile <input type="number" id="perLine" min="1" max="8" value="3" style="width:4.5em;font:inherit;padding:4px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg)"></label>
+      <label class="chk">Zeilen <input type="number" id="lines" min="1" max="5" value="1" style="width:4.5em;font:inherit;padding:4px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg)"></label>
+      <label class="chk"><input type="checkbox" id="readOnly" checked> ⏱ Nur Lesezeit stoppen (Uhr läuft nur beim Sprechen)</label>
+      <label class="chk">Mikrofon:
+        <select id="gain" style="font:inherit;padding:6px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg)">
+          <option value="1">normal</option>
+          <option value="3">laut (×3)</option>
+          <option value="6">sehr laut (×6)</option>
+        </select>
+      </label>
+      <label class="chk"><input type="checkbox" id="hard"> 🔥 Schwerer Modus: Silben werden durchgemischt (Schere → <b>re·Sche</b>)</label>
+    </div>
+    <div id="flashMsg" style="color:var(--muted);margin-top:8px;min-height:1.2em"></div>
+  </section>
+
+  <section>
+    <h2>4. Stoppuhr</h2>
+    <div id="time">00:00.00</div>
+    <div class="row" style="justify-content:center">
+      <button id="start" class="ok">Start</button>
+      <button id="lap" class="secondary" disabled>Runde</button>
+      <button id="reset" class="secondary">Zurücksetzen</button>
+    </div>
+    <ol id="laps"></ol>
+  </section>
+</main>
+
+<!-- Blitzlesen: Vollbild-Ansicht, alles andere ist ausgeblendet -->
+<div id="flashView" hidden>
+  <div id="flashTime">00:00.00</div>
+  <div id="flashBadge" hidden>🔥 Schwerer Modus – die Silben sind durcheinander!</div>
+  <div id="flashWord"></div>
+  <div id="flashInfo"></div>
+  <div id="flashStatus"></div>
+  <div id="flashMeter" title="Mikrofonpegel"><div id="flashMeterBar"></div></div>
+  <div class="row" style="justify-content:center;margin-top:20px">
+    <button id="flashSkip" class="secondary">Weiter ⏭</button>
+    <button id="flashStop" class="danger">Abbrechen</button>
+    <button id="flashDone" hidden>Schließen</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hyphen@1.14.1/hyphen.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hyphen@1.14.1/patterns/de-1996.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.40.0/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle-min.js"></script>
+<script src="match.js"></script>
+<script src="syllables.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let words = [];
+
+/* ---------- Anmeldung: ohne gültige Session zurück zum Login ---------- */
+document.querySelector('main').hidden = true;
+fetch('/api/me').then(r => r.ok ? r.json() : Promise.reject()).then(me => {
+  $('who').textContent = me.email;
+  document.querySelector('main').hidden = false;
+  refreshLists();
+  fetchToken().catch(() => {});   // Speech-Token vorwärmen
+}).catch(() => { location.href = '/login.html'; });
+$('logout').onclick = async () => { await fetch('/api/logout', { method: 'POST' }); location.href = '/login.html'; };
+
+/* ---------- Upload & OCR ---------- */
+$('file').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  $('preview').src = URL.createObjectURL(f);
+  $('preview').style.display = 'block';
+  $('scan').disabled = false;
+  $('status').textContent = '';
+});
+
+$('scan').addEventListener('click', async () => {
+  const f = $('file').files[0];
+  if (!f) return;
+  const bar = $('progress');
+  $('scan').disabled = true;
+  bar.style.display = 'block'; bar.value = 0;
+  try {
+    const { data } = await Tesseract.recognize(f, 'deu', {
+      logger: m => {
+        if (m.status === 'recognizing text') bar.value = m.progress;
+        $('status').textContent = m.status === 'recognizing text'
+          ? `Erkenne Text… ${Math.round(m.progress * 100)} %`
+          : 'Lade Sprachdaten (Deutsch)…';
+      }
+    });
+    const found = extractWords(data.text);
+    words = ($('dedupe').checked ? [...new Set(found)] : found).map(mk);
+    $('status').textContent = `${found.length} Wörter erkannt.`;
+    shuffle();
+  } catch (err) {
+    $('status').textContent = 'Fehler beim Scannen: ' + err.message;
+  } finally {
+    bar.style.display = 'none';
+    $('scan').disabled = false;
+  }
+});
+
+function extractWords(text) {
+  return (text.match(/[A-Za-zÄÖÜäöüß]+(?:-[A-Za-zÄÖÜäöüß]+)*/g) || [])
+    .filter(w => w.length > 1) // Einzelbuchstaben sind meist OCR-Rauschen
+    .filter(w => !ARTICLES.has(w.toLowerCase())); // Artikel werden nicht mitgelesen
+}
+const ARTICLES = new Set(['der', 'die', 'das', 'den', 'dem', 'des',
+  'ein', 'eine', 'einen', 'einem', 'einer', 'eines']);
+
+/* ---------- Liste ---------- */
+// Jedes Wort: w = Original, s = Version mit vertauschten Silben (schwerer Modus)
+const mk = w => { const parts = scrambleParts(w); return { w, parts, s: parts.join('') }; };
+const rescramble = o => { o.parts = scrambleParts(o.w); o.s = o.parts.join(''); };
+
+function render() {
+  const ul = $('words');
+  const hard = $('hard').checked;
+  ul.innerHTML = '';
+  words.forEach((o, i) => {
+    const li = document.createElement('li');
+    li.append(hard ? o.parts.join('·') : o.w);
+    const b = document.createElement('button');
+    b.textContent = '×'; b.title = 'Entfernen';
+    b.onclick = () => { words.splice(i, 1); render(); };
+    li.append(b);
+    ul.append(li);
+  });
+  $('count').textContent = words.length ? `${words.length} Wörter` : '';
+  ['shuffle', 'big', 'clear'].forEach(id => $(id).disabled = !words.length);
+  $('flashStart').disabled = !words.length || flash.active;
+  $('saveList').disabled = !words.length;
+}
+
+function shuffle() { // Fisher-Yates
+  for (let i = words.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [words[i], words[j]] = [words[j], words[i]];
+  }
+  words.forEach(rescramble); // Silben neu mischen
+  render();
+}
+
+$('shuffle').onclick = shuffle;
+$('hard').onchange = render;
+$('clear').onclick = () => { words = []; render(); };
+$('big').onclick = () => {
+  const on = $('words').classList.toggle('big');
+  $('big').textContent = on ? '↩ Normale Ansicht' : '🔍 Große Ansicht';
+};
+function addWord() {
+  // mehrere Wörter auf einmal: getrennt durch Leerzeichen, Komma, Semikolon oder Zeilenumbruch (Artikel bleiben, wenn eigene Eingabe)
+  const parts = $('addInput').value.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
+  if (parts.length) { parts.forEach(p => words.push(mk(p))); $('addInput').value = ''; render(); }
+}
+
+/* ---------- Eigene Listen speichern / laden (pro Konto, in Azure) ---------- */
+let savedLists = [];
+const listMsg = (t, err) => { $('listMsg').textContent = t; $('listMsg').style.color = err ? 'var(--danger)' : 'var(--muted)'; };
+
+async function api(method, url, body) {
+  const r = await fetch(url, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401) { location.href = '/login.html'; throw new Error('Nicht angemeldet'); }
+  if (!r.ok) throw new Error(d.error || 'Fehler ' + r.status);
+  return d;
+}
+
+async function refreshLists(selectName) {
+  try {
+    savedLists = (await api('GET', '/api/lists')).lists;
+  } catch (e) { savedLists = []; listMsg('Gespeicherte Listen nicht erreichbar: ' + e.message, true); }
+  const sel = $('listSelect');
+  sel.innerHTML = '';
+  savedLists.forEach(l => sel.add(new Option(`${l.name} (${l.words.length})`, l.name)));
+  if (!savedLists.length) sel.add(new Option('– keine gespeicherten Listen –', ''));
+  if (selectName) sel.value = selectName;
+  $('loadList').disabled = $('delList').disabled = !savedLists.length;
+}
+
+$('saveList').onclick = async () => {
+  const name = $('listName').value.trim() || $('listSelect').value;
+  if (!name) { listMsg('Bitte einen Listennamen eingeben.', true); return; }
+  try {
+    const d = await api('PUT', '/api/lists', { name, words: words.map(o => o.w) });
+    listMsg(`„${name}“ ${d.replaced ? 'aktualisiert' : 'gespeichert'} (${words.length} Wörter).`);
+    $('listName').value = '';
+    await refreshLists(name);
+  } catch (e) { listMsg(e.message, true); }
+};
+$('loadList').onclick = () => {
+  const l = savedLists.find(x => x.name === $('listSelect').value);
+  if (!l) return;
+  words = l.words.map(mk);
+  shuffle();
+  $('listName').value = l.name;
+  listMsg(`„${l.name}“ geladen (${l.words.length} Wörter).`);
+};
+$('delList').onclick = async () => {
+  const name = $('listSelect').value;
+  if (!name || !confirm(`Liste „${name}“ wirklich löschen?`)) return;
+  try { await api('DELETE', '/api/lists?name=' + encodeURIComponent(name)); listMsg(`„${name}“ gelöscht.`); await refreshLists(); }
+  catch (e) { listMsg(e.message, true); }
+};
+$('add').onclick = addWord;
+$('addInput').addEventListener('keydown', e => { if (e.key === 'Enter') addWord(); });
+
+/* ---------- Stoppuhr ---------- */
+let running = false, t0 = 0, elapsed = 0, raf = 0;
+const fmt = ms => {
+  const cs = Math.floor(ms / 10) % 100, s = Math.floor(ms / 1000) % 60, m = Math.floor(ms / 60000);
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
+};
+const now = () => elapsed + (running ? performance.now() - t0 : 0);
+function tick() { $('flashTime').textContent = $('time').textContent = fmt(now()); if (running) raf = requestAnimationFrame(tick); }
+
+$('start').onclick = () => {
+  if (!running) {
+    running = true; t0 = performance.now();
+    $('start').textContent = 'Stopp'; $('start').className = 'danger';
+    $('lap').disabled = false;
+    $('flashTime').classList.add('on');
+    tick();
+  } else {
+    elapsed = now(); running = false; cancelAnimationFrame(raf);
+    $('start').textContent = 'Weiter'; $('start').className = 'ok';
+    $('lap').disabled = true;
+    $('flashTime').classList.remove('on');
+    $('flashTime').textContent = $('time').textContent = fmt(elapsed);
+  }
+};
+// Rundenzeit: Zeit seit der letzten Runde (bei Blitzlesen = reine Lesezeit pro Wort), dazu die Gesamtzeit
+let lastLap = 0;
+function addLap(label) {
+  const li = document.createElement('li');
+  li.textContent = `${label ? label + ': ' : ''}${fmt(now() - lastLap)} (gesamt ${fmt(now())})`;
+  lastLap = now();
+  $('laps').append(li);
+}
+$('lap').onclick = () => addLap();
+$('reset').onclick = () => {
+  running = false; elapsed = 0; lastLap = 0; cancelAnimationFrame(raf);
+  $('flashTime').textContent = $('time').textContent = fmt(0);
+  $('flashTime').classList.remove('on');
+  $('start').textContent = 'Start'; $('start').className = 'ok';
+  $('lap').disabled = true; $('laps').innerHTML = '';
+};
+const timerOn = () => { if (!running) $('start').click(); };
+const timerOff = () => { if (running) $('start').click(); };
+
+/* ---------- Blitzlesen mit Spracherkennung (Azure Speech) ---------- */
+const flash = { active: false, i: 0, list: [], recognizer: null, advancing: false };
+
+// norm / lev / matches kommen aus match.js (inkl. Klangvergleich für Kinderstimmen)
+const getLevel = () => $('level').value;
+try { $('level').value = localStorage.getItem('level') || 'normal'; } catch {}
+$('level').onchange = () => { try { localStorage.setItem('level', $('level').value); } catch {} };
+// Mittelschwer-Einstellungen merken (Standard: 3 Wörter, 1 Zeile)
+try {
+  $('pkgOn').checked = localStorage.getItem('pkgOn') === '1';
+  $('perLine').value = localStorage.getItem('perLine') || '3';
+  $('lines').value = localStorage.getItem('lines') || '1';
+} catch {}
+const syncPkg = () => { $('perLine').disabled = $('lines').disabled = !$('pkgOn').checked; };
+syncPkg();
+['pkgOn', 'perLine', 'lines'].forEach(id => $(id).addEventListener('change', () => {
+  syncPkg();
+  try { localStorage.setItem('pkgOn', $('pkgOn').checked ? '1' : '0'); localStorage.setItem('perLine', $('perLine').value); localStorage.setItem('lines', $('lines').value); } catch {}
+}));
+try { $('gain').value = localStorage.getItem('gain') || '3'; } catch {}
+$('gain').onchange = () => { try { localStorage.setItem('gain', $('gain').value); } catch {} };
+
+// Schwerer Modus gilt nur für Wörter mit mindestens 2 Silben
+const isHard = o => $('hard').checked && o.parts.length > 1;
+
+// Merkt die App, dass das Silbengemisch vorgelesen wird (der Anfang des Gesprochenen passt zur ersten
+// angezeigten Silbe), wird die Anfangssilbe des RICHTIGEN Wortes im Gemisch hervorgehoben
+// (Schere → "reSche": hervorgehoben wird "Sche").
+function markFirstSyllable(heardText, o, wordEl) {
+  const shown = norm(o.parts[0]);
+  if (!shown) return;
+  const words = heardText.split(/\s+/).map(norm).filter(Boolean);
+  const cands = [...words, words.join('')];
+  const reading = cands.some(c => {
+    const head = c.slice(0, shown.length);
+    return head === shown || (shown.length >= 4 && lev(head, shown) <= 1);
+  });
+  if (!reading) return;
+  const idx = o.parts.indexOf(syllabify(o.w)[0]);   // Position der echten Anfangssilbe im Gemisch
+  const el = wordEl && wordEl.querySelectorAll('.syl')[idx];
+  if (el) el.classList.add('hit');
+}
+
+function flashSet(msg) { $('flashStatus').textContent = $('flashMsg').textContent = msg; }
+
+// Zielform eines Wortes: im schweren Modus das Silbengemisch, sonst das Wort
+const targetOf = o => isHard(o) ? o.s : o.w;
+
+// Paketgröße: im mittelschweren Modus Wörter pro Zeile × Zeilen, sonst 1 Wort
+function packageSettings() {
+  if (!$('pkgOn').checked) return { perLine: 1, size: 1 };
+  const clamp = (v, lo, hi, d) => Math.min(hi, Math.max(lo, parseInt(v, 10) || d));
+  const perLine = clamp($('perLine').value, 1, 8, 3), lines = clamp($('lines').value, 1, 5, 1);
+  return { perLine, size: perLine * lines };
+}
+
+// Zeigt das aktuelle Paket (1 Wort oder mehrere Wörter in Zeilen). Gelesene Wörter werden grün.
+function showFlashPackage() {
+  const { perLine } = flash;
+  flash.pkg = flash.list.slice(flash.pi, flash.pi + flash.size);
+  flash.ptr = 0;
+  const fw = $('flashWord');
+  fw.textContent = '';
+  // Schriftgröße so, dass eine Zeile in ca. 90 % der Breite passt
+  fw.style.setProperty('--fs', perLine === 1 ? 'clamp(3rem, 14vw, 9rem)' : `clamp(1.6rem, ${(90 / (perLine * 5.5)).toFixed(1)}vw, 7rem)`);
+  for (let r = 0; r * perLine < flash.pkg.length; r++) {
+    const line = document.createElement('div');
+    line.className = 'flashLine';
+    flash.pkg.slice(r * perLine, (r + 1) * perLine).forEach((o, j) => {
+      const idx = r * perLine + j;
+      const el = document.createElement('span');
+      el.className = 'fwd';
+      if (isHard(o)) { // jede Silbe in eigener Farbe, damit das Durcheinander sofort sichtbar ist
+        o.parts.forEach(p => { const sp = document.createElement('span'); sp.className = 'syl'; sp.textContent = p; el.append(sp); });
+      } else el.textContent = o.w;
+      el.onclick = () => setPtr(idx + 1);       // Antippen = Wort als gelesen markieren (falls es nicht erkannt wird)
+      line.append(el);
+    });
+    fw.append(line);
+  }
+  $('flashBadge').hidden = !$('hard').checked;
+  const a = flash.pi + 1, b = Math.min(flash.pi + flash.size, flash.list.length);
+  $('flashInfo').textContent = a === b ? `Wort ${a} von ${flash.list.length}` : `Wörter ${a}–${b} von ${flash.list.length}`;
+  if (flash.ready) $('flashStatus').textContent = '🎤 Ich höre zu…';
+  paintPackage();
+}
+
+function paintPackage() {
+  [...$('flashWord').querySelectorAll('.fwd')].forEach((el, i) => {
+    el.classList.toggle('done', i < flash.ptr);
+    el.classList.toggle('cur', i === flash.ptr);
+  });
+}
+
+// Setzt den Lesefortschritt im Paket; ist es komplett, geht es zum nächsten Paket
+function setPtr(n) {
+  if (!flash.active || flash.advancing) return;
+  n = Math.min(n, flash.pkg.length);
+  if (n <= flash.ptr) return;
+  flash.ptr = n;
+  paintPackage();
+  if (flash.ptr >= flash.pkg.length) next(true);
+}
+
+// Geht die gehörten Wörter der Reihe nach durch und rückt im Paket vor. Silben ("Sche re") dürfen auf bis zu
+// 3 Erkennungs-Wörter verteilt sein. Nicht passende Wörter werden übersprungen (Versprecher, Reste vom Vorwort).
+function advanceInPackage(heard, ptr) {
+  const toks = heard.split(/\s+/).filter(Boolean);
+  const targets = flash.pkg.map(targetOf);
+  let k = 0;
+  while (k < toks.length && ptr < targets.length) {
+    let hit = 0;
+    for (let n = 1; n <= 3 && k + n <= toks.length; n++) {
+      if (matches(toks.slice(k, k + n).join(''), [targets[ptr]], getLevel())) { hit = n; break; }
+    }
+    if (hit) { ptr++; k += hit; } else k++;
+  }
+  return ptr;
+}
+
+// Token vorab holen (spart beim Start ~0,5 s) und bis zu 8 Minuten wiederverwenden
+let tokenCache = null;
+async function fetchToken() {
+  if (tokenCache && Date.now() - tokenCache.t < 8 * 60 * 1000) return tokenCache;
+  const r = await fetch('/api/speech-token');
+  if (!r.ok) throw new Error('Kein Speech-Token (läuft "node server.js" und bist du per "az login" angemeldet?)');
+  tokenCache = { ...(await r.json()), t: Date.now() };
+  return tokenCache;
+}
+
+// Mikrofon mit Verstärkung: leise Kinderstimmen kommen sonst zu schwach bei Azure an.
+// Ohne Echo-/Rauschunterdrückung (die schneidet leise Sprache ab), mit automatischer Pegelregelung + Kompressor gegen Übersteuern.
+async function openMic() {
+  const raw = await navigator.mediaDevices.getUserMedia({
+    audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true }
+  });
+  const ctx = new AudioContext();
+  await ctx.resume();
+  const src = ctx.createMediaStreamSource(raw);
+  const gain = ctx.createGain();
+  gain.gain.value = Number($('gain').value) || 3;
+  const comp = ctx.createDynamicsCompressor();
+  const dest = ctx.createMediaStreamDestination();
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 512;
+  src.connect(gain); gain.connect(comp); comp.connect(dest); comp.connect(analyser);
+  const mic = { raw, ctx, analyser, stream: dest.stream, raf: 0 };
+  const buf = new Uint8Array(analyser.fftSize);
+  const meter = $('flashMeterBar');
+  const draw = () => { // Pegelanzeige: zeigt sofort, ob die Stimme ankommt
+    analyser.getByteTimeDomainData(buf);
+    let peak = 0;
+    for (const v of buf) peak = Math.max(peak, Math.abs(v - 128));
+    const level = peak / 128;                     // 0..1
+    meter.style.width = Math.min(100, level * 100 * 1.6) + '%';
+    if (mic.onLevel) mic.onLevel(level, performance.now());
+    mic.raf = requestAnimationFrame(draw);
+  };
+  draw();
+  return mic;
+}
+function closeMic(mic) {
+  if (!mic) return;
+  cancelAnimationFrame(mic.raf);
+  mic.raw.getTracks().forEach(t => t.stop());
+  mic.ctx.close().catch(() => {});
+  $('flashMeterBar').style.width = '0';
+}
+
+async function getSpeechConfig() {
+  const { token, region } = await fetchToken();
+  const cfg = SpeechSDK.SpeechConfig.fromAuthorizationToken(token, region);
+  cfg.speechRecognitionLanguage = 'de-DE';
+  cfg.outputFormat = SpeechSDK.OutputFormat.Detailed;   // liefert NBest-Alternativen
+  return { cfg, issued: Date.now() };
+}
+
+async function flashStart() {
+  if (!words.length || flash.active) return;
+  if (typeof SpeechSDK === 'undefined') { flashSet('Speech SDK konnte nicht geladen werden (Internet?).'); return; }
+  flashSet('Verbinde mit Azure Speech…');
+  try {
+    const [{ cfg }, mic] = await Promise.all([getSpeechConfig(), openMic()]);
+    flash.mic = mic;
+    const audio = SpeechSDK.AudioConfig.fromStreamInput(mic.stream);
+    const rec = new SpeechSDK.SpeechRecognizer(cfg, audio);
+    flash.recognizer = rec;
+    flash.list = words.slice();
+    const ps = packageSettings();
+    flash.size = ps.size; flash.perLine = ps.perLine; flash.pi = 0;
+    flash.active = true; flash.advancing = false; flash.ready = false;
+
+    // Phrase-Liste mit höchster Gewichtung: die Wörter des aktuellen Pakets werden bevorzugt erkannt
+    const pl = SpeechSDK.PhraseListGrammar.fromRecognizer(rec);
+    try { pl.setWeight(2); } catch {}
+    const updatePhrases = () => {
+      pl.clear();
+      flash.pkg.forEach(o => pl.addPhrase(targetOf(o)));
+    };
+
+    // alts: weitere Erkennungs-Kandidaten (NBest) – bei Kinderstimmen steht das Richtige oft nicht auf Platz 1
+    const onHeard = (text, alts = []) => {
+      if (!flash.active || flash.advancing || !text) return;
+      const info = $('flashInfo').textContent.split(' · gehört')[0];
+      $('flashInfo').textContent = `${info} · gehört: „${text}“`;
+      const all = [text, ...alts];
+      // Im schweren Modus: Anfangssilbe des richtigen Wortes hervorheben, sobald das Gemisch gelesen wird (aktuelles Wort)
+      const cur = flash.pkg[flash.ptr];
+      if (cur && isHard(cur)) {
+        const el = $('flashWord').querySelectorAll('.fwd')[flash.ptr];
+        all.forEach(t => markFirstSyllable(t, cur, el));
+      }
+      // Fortschritt = bester Kandidat; im schweren Modus zählt nur das Silbengemisch, nicht das richtige Wort
+      const best = Math.max(...all.map(t => advanceInPackage(t, flash.ptr)));
+      if (best > flash.ptr) setPtr(best);
+    };
+    const nbest = r => {
+      try {
+        const j = JSON.parse(r.properties.getProperty(SpeechSDK.PropertyId.SpeechServiceResponse_JsonResult));
+        return (j.NBest || []).flatMap(n => [n.Display, n.Lexical]).filter(Boolean);
+      } catch { return []; }
+    };
+    rec.recognizing = (_s, e) => onHeard(e.result.text);   // schnell: schon beim Zwischenergebnis weiter
+    rec.recognized = (_s, e) => { if (e.result.reason === SpeechSDK.ResultReason.RecognizedSpeech) onHeard(e.result.text, nbest(e.result)); };
+    rec.canceled = (_s, e) => { flashSet('Abbruch: ' + (e.errorDetails || e.reason)); flashEnd(false); };
+
+    flash.updatePhrases = updatePhrases;
+    $('flashView').hidden = false;
+    $('flashSkip').hidden = $('flashStop').hidden = false; $('flashDone').hidden = true;
+    document.body.style.overflow = 'hidden';
+    flash.updatePhrases = updatePhrases;
+    showFlashPackage(); updatePhrases();
+    $('flashStatus').textContent = '⏳ Verbinde…';
+    // Stoppuhr erst starten, wenn die App wirklich zuhört (nicht während des Verbindungsaufbaus)
+    rec.sessionStarted = () => {
+      if (flash.ready || !flash.active) return;
+      flash.ready = true;
+      $('flashStatus').textContent = '🎤 Ich höre zu…';
+      $('reset').click();
+      if (!$('readOnly').checked) { timerOn(); return; }   // klassisch: Uhr läuft durch
+      // Nur Lesezeit: Uhr läuft, solange gesprochen wird (Stimmaktivität am Mikrofon, mit kurzer Nachlaufzeit
+      // von 0,7 s, damit Pausen zwischen Silben mitgezählt werden). Pegel der Umgebung wird kurz eingemessen.
+      const vad = { start: performance.now(), samples: [], thr: 0.08, voice: 0, lastVoice: 0 };
+      mic.onLevel = (lvl, t) => {
+        if (!flash.active) return;
+        if (t - vad.start < 500) {                  // Kalibrierung: Grundrauschen
+          vad.samples.push(lvl);
+          const avg = vad.samples.reduce((a, b) => a + b, 0) / vad.samples.length;
+          vad.thr = Math.max(0.08, avg * 3);
+          return;
+        }
+        if (lvl > vad.thr) {
+          vad.voice++; vad.lastVoice = t;
+          if (vad.voice >= 2) timerOn();            // 2 Frames in Folge, ignoriert Knacken
+        } else {
+          vad.voice = 0;
+          if (running && t - vad.lastVoice > 700) timerOff();
+        }
+      };
+    };
+    // Verbindung vorab öffnen, dann erst zuhören
+    try { SpeechSDK.Connection.fromRecognizer(rec).openConnection(); } catch {}
+    rec.startContinuousRecognitionAsync(() => {}, err => { flashSet('Mikrofon/Dienst-Fehler: ' + err); flashEnd(false); });
+
+    // Token läuft nach 10 Min ab → alle 8 Min erneuern
+    flash.refresh = setInterval(async () => {
+      try { const r = await fetch('/api/speech-token'); if (r.ok) rec.authorizationToken = (await r.json()).token; } catch {}
+    }, 8 * 60 * 1000);
+  } catch (err) {
+    flashSet('Fehler: ' + err.message);
+    flashEnd(false);
+  }
+}
+
+function next(heardOk) {
+  flash.advancing = true;
+  if (heardOk) { $('flashStatus').textContent = '✅ Richtig!'; }
+  const a = flash.pi + 1, b = Math.min(flash.pi + flash.size, flash.list.length);
+  addLap(a === b ? `Wort ${a}` : `Wörter ${a}–${b}`);   // Lesezeit pro Paket
+  setTimeout(() => {
+    flash.pi += flash.size;
+    if (flash.pi >= flash.list.length) { flashEnd(true); return; }
+    showFlashPackage(); flash.updatePhrases();
+    flash.advancing = false;
+  }, heardOk ? 300 : 0);
+}
+
+function flashEnd(finished) {
+  clearInterval(flash.refresh);
+  const rec = flash.recognizer;
+  flash.recognizer = null; flash.active = false;
+  closeMic(flash.mic); flash.mic = null;
+  if (rec) { rec.stopContinuousRecognitionAsync(() => rec.close(), () => rec.close()); }
+  timerOff();                                     // Stoppuhr stoppen
+  $('flashSkip').hidden = $('flashStop').hidden = true;
+  if (finished) {
+    $('flashBadge').hidden = true;
+    $('flashWord').textContent = '🎉 Geschafft!';
+    $('flashWord').style.setProperty('--fs', 'clamp(3rem, 14vw, 9rem)');
+    $('flashInfo').textContent = `${$('readOnly').checked ? 'Lesezeit' : 'Zeit'}: ${$('time').textContent}`;
+    $('flashStatus').textContent = '';
+    $('flashDone').hidden = false;
+  } else {
+    closeFlash();
+  }
+  render();
+}
+
+function closeFlash() {
+  $('flashView').hidden = true;
+  document.body.style.overflow = '';
+}
+$('flashDone').onclick = closeFlash;
+
+$('flashStart').onclick = flashStart;
+$('flashSkip').onclick = () => { if (flash.active && !flash.advancing) next(false); };
+$('flashStop').onclick = () => flashEnd(false);
+
+render();
+</script>
+</body>
+</html>

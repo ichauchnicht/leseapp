@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leseapp – Anmelden</title>
+<style>
+  :root { --bg:#f6f7fb; --card:#fff; --fg:#1d2433; --muted:#6b7385; --accent:#3b6cf6; --danger:#d64545; --ok:#1f9d55; --line:#e3e6ee; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#12151d; --card:#1b2030; --fg:#eef0f6; --muted:#9aa2b5; --line:#2c3347; } }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,Segoe UI,Arial,sans-serif; background:var(--bg); color:var(--fg); min-height:100vh; display:grid; place-items:center; padding:16px; }
+  main { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:24px; width:100%; max-width:380px; }
+  h1 { margin:0 0 16px; }
+  .tabs { display:flex; gap:8px; margin-bottom:16px; }
+  .tabs button { flex:1; background:transparent; color:var(--fg); border:1px solid var(--line); }
+  .tabs button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  label { display:block; margin:12px 0 4px; color:var(--muted); font-size:.9rem; }
+  input { width:100%; font:inherit; padding:10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--fg); }
+  button { font:inherit; padding:10px 16px; border:0; border-radius:10px; background:var(--accent); color:#fff; cursor:pointer; }
+  button[type=submit] { width:100%; margin-top:16px; }
+  button:disabled { opacity:.5; }
+  #msg { margin-top:14px; min-height:1.3em; }
+  #msg.err { color:var(--danger); } #msg.ok { color:var(--ok); }
+</style>
+</head>
+<body>
+<main>
+  <h1>📖 Leseapp</h1>
+  <div class="tabs">
+    <button type="button" id="tabLogin" class="on">Anmelden</button>
+    <button type="button" id="tabReg">Registrieren</button>
+  </div>
+  <form id="form">
+    <label for="email">E-Mail</label>
+    <input id="email" type="email" autocomplete="email" required>
+    <label for="pw">Passwort</label>
+    <input id="pw" type="password" minlength="10" autocomplete="current-password" required>
+    <div id="hint" style="color:var(--muted);font-size:.85rem;margin-top:6px" hidden>Mindestens 10 Zeichen. Nach der Registrierung muss Janine deinen Zugang freigeben.</div>
+    <button type="submit" id="submit">Anmelden</button>
+  </form>
+  <div id="msg"></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let mode = 'login';
+
+function setMode(m) {
+  mode = m;
+  $('tabLogin').classList.toggle('on', m === 'login');
+  $('tabReg').classList.toggle('on', m === 'register');
+  $('submit').textContent = m === 'login' ? 'Anmelden' : 'Registrieren';
+  $('hint').hidden = m === 'login';
+  $('pw').autocomplete = m === 'login' ? 'current-password' : 'new-password';
+  $('msg').textContent = ''; $('msg').className = '';
+}
+$('tabLogin').onclick = () => setMode('login');
+$('tabReg').onclick = () => setMode('register');
+
+$('form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const msg = $('msg'); msg.className = ''; msg.textContent = '…';
+  $('submit').disabled = true;
+  try {
+    const r = await fetch(mode === 'login' ? '/api/login' : '/api/register', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: $('email').value, password: $('pw').value })
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { msg.className = 'err'; msg.textContent = d.error || 'Fehler (' + r.status + ')'; return; }
+    if (mode === 'login') { location.href = '/'; return; }
+    msg.className = 'ok';
+    msg.textContent = 'Danke! Janine hat eine Freigabe-Anfrage bekommen. Du kannst dich anmelden, sobald sie freigegeben hat (du bekommst eine Mail).';
+    $('form').reset();
+  } catch (err) {
+    msg.className = 'err'; msg.textContent = 'Keine Verbindung.';
+  } finally { $('submit').disabled = false; }
+});
+</script>
+</body>
+</html>
